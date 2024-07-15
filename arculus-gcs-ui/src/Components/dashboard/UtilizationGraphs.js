@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, LinearScale, PointElement, LineElement, TimeScale, Title, Tooltip, Legend } from 'chart.js';
-import Paper from '@material-ui/core/Paper';
+import Paper from '@mui/material/Paper';
 import { API_URL } from '../../config';
 
 ChartJS.register(LinearScale, PointElement, LineElement, TimeScale, Title, Tooltip, Legend);
