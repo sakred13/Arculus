@@ -189,7 +189,7 @@ CREATE TABLE `user` (
 
 --
 -- Dumping data for table `user`
--
+
 
 --
 -- Table structure for table `blacklist`
