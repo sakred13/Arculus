@@ -56,7 +56,7 @@ The CHN server offers functionalities to deploy, undeploy honeypots, and monitor
 
 - **Retrieve API Key**
   Go to the settings page of the CHN Server to retrieve the API Key.
-  ![Retrieving the API Key](documentation_screenshots/apikey.png)
+  ![Retrieving the API Key](documentation_screenshots/chn_server_apikey.png)
 
 - **Retrieve Deploy Key**
   Go to the "Deploy" tab of the CHN Server and choose a honeypot type for the dashboard to display a sample script. Fetch the deploy key as shown in the screenshot below:
