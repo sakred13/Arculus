@@ -75,4 +75,4 @@ echo "Starting UI server with PM2..."
 pm2 start server.js --name ui-server
 cd ..
 
-echo "Setup process completed successfully!"
+echo "Arculus successfully setup! Access the Arculus UI at http://${public_ip}:3000"
