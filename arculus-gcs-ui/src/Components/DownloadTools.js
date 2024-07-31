@@ -16,7 +16,7 @@ function DownloadTools() {
     const [nodeName, setNodeName] = useState('');
 
     const handleNodeNameChange = (event) => {
-        const updatedNodeName = event.target.value || '';
+        const updatedNodeName = event.target.value.replace(/[^a-zA-Z0-9]/g, ''); // Use a regular expression to allow only letters and digits
         setNodeName(updatedNodeName);
         setTextToCopy(generateDownloadScript(updatedNodeName));
     };
