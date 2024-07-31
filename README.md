@@ -1,110 +1,81 @@
-# Arculus Test Bed
 
-This repository contains the UI, back-end and database infrastructure to setup a test-bed on cloud/physical infrastructure to manage device clusters, users, and assign network policies dynamically to achieve Role-Based, Function-Based, and Risk-Based Access Control through a Ground Control Client Application.
+# Arculus Drone Testbed Setup Guide
 
-## Getting Started
+This documentation primarily focuses on setting up the Arculus Drone Testbed. Setting up the Community Honey Network (CHN) server is optional and provided for users who need to deploy and monitor honeypots.
 
-### Prerequisites
+## CHN Server Setup (Optional)
+The CHN server offers functionalities to deploy, undeploy honeypots, and monitor attacker activities.
 
-For initial setup of the master node which container a ground controller, an EC2 instance or physical machine with Docker installed and having at least 4 GB memory running on Ubuntu is required. For each worker node which will hold a K3S pod, a machine/EC2 instance with 1 GB memory is sufficient.
+### Installation Steps
 
-### Setting up the Ground Controller
+1. **Update System Packages**
+   ```bash
+   sudo apt-get update
+   ```
+   
+2. **Install Required Packages**
+   ```bash
+   sudo apt-get install -y python3-validators docker.io docker-compose
+   ```
+   
+3. **Clone the CHN Server Repository**
+   ```bash
+   sudo mkdir -p /opt && sudo git clone https://github.com/CommunityHoneyNetwork/chn-quickstart.git /opt/chnserver
+   ```
+   
+4. **Enter the Quickstart Directory**
+   ```bash
+   cd /opt/chnserver
+   ```
+   
+5. **Run the Quickstart Process**
+   ```bash
+   sudo ./guided_docker_compose.py
+   ```
+   - ![Input the public domain name of the host machine for the CHN server](documentation_screenshots/chn_server_domain.png)
+   - ![Choose SELFSIGNED as the preferred certification strategy](documentation_screenshots/chn_server_cert_strategy.png)
+   - ![Choose json as the default logging format](documentation_screenshots/chn_server_logging.png)
+   - ![Rest of the configuration for the CHN Server](documentation_screenshots/chn_server_config.png)
 
-To set up the ground controller as the master node, follow these steps:
+### Starting the CHN Server
+   ```bash
+   docker-compose up -d
+   ```
 
-1. Make sure not to run commands as sudo by default. Only run commands as super-user where specified.
+### Accessing the CHN Server
 
-2. On the controller machine, run the script `setup_controller.sh` to configure it as a K3S master node.
+- **Retrieve Credentials**
+  ```bash
+  grep SUPERUSER /opt/chnserver/config/sysconfig/chnserver.env
+  ```
+  ![Fetching the login credentials](documentation_screenshots/chn_server_credentials.png)
 
-```bash
-#!/bin/bash
-./setup_controller.sh
-```
+- **Login to CHN Server Dashboard**
+  Visit the public domain of the CHN Server on a browser and use the credentials to login.
+  ![Logging into the CHN Server Dashboard](documentation_screenshots/chn_server_login.png)
 
-Running this script installs K3s on the controller machine and sets it up as the primary node of the cluster.
+- **Retrieve API Key**
+  Go to the settings page of the CHN Server to retrieve the API Key.
+  ![Retrieving the API Key](documentation_screenshots/chn_server_apikey.png)
 
-3. Now modify the docker image that holds the client application's MySQL database server to have the desired password, build and deploy it as a container with the required port-mapping by running the below commands from the project's root directory.
-```bash
-#!/bin/bash
-cd arculus-gcs-mysql
-sudo apt update
-sudo apt install docker.io npm
-sudo docker build -t arculus-gcs-mysql:latest .
-sudo docker run -p 3306:3306 --name arculus-gcs-db arculus-gcs-mysql
-```
+- **Retrieve Deploy Key**
+  Go to the "Deploy" tab of the CHN Server and choose a honeypot type for the dashboard to display a sample script. Fetch the deploy key as shown in the screenshot below:
+  ![Fetching the deploy key of the CHN Server](documentation_screenshots/chn_server_deploykey.png)
 
-4. To turn up the node.js back-end application, navigate to `arculus-gcs-node/` and update `dbConfigs.json` with the database credentials, `dockerImageConfig.json` with device type - docker image mapping from DockerHub, `EMAIL_API_KEY.txt` with SMTP API key, and `ENCRYPTION_SECRET.txt` with a random 256-bit encryption key to be used for encryption for authorization and other purposes.
+### Additional Resources
+For detailed steps on each part of the CHN Server Setup process, visit:
+https://communityhoneynetwork.readthedocs.io/en/stable/serverinstall/
 
-5. Now run the following commands to install the needed dependencies and start a development API server on port 3001. 
-```bash
-#!/bin/bash
-npm install
-npm start
-```
+## Arculus Drone Testbed Setup
 
-6. To start a deployment server, run the following commands.
-```bash
-#!/bin/bash
-npm install
-pm2 start index.js
-```
+On a different machine designated to host the Arculus server, navigate to the Arculus repository's root directory.
 
-7. Follow instructions at https://communityhoneynetwork.readthedocs.io/en/stable/serverinstall/ to setup a CHN server for honeypots. Note down its URL, deploy key, user name, password, and API key, and update these in the honeypot_config.json of the node.js codebase. This lets our UI communicate with the CHN server's SDK APIs through our proxy honeypot server.
- 
-8. Before starting the UI server of the Ground Control Client, update `arculus-gcs-ui/config.js` with the public IP address of the controller node for API access. Update the PRIVATE_IP constant to the private IP address of the instance. Update the CHN_URL constant with the CHN server's URL.
+1. **Setup Script**
+   ```bash
+   sudo chmod +x arculus-setup.sh
+   ./arculus-setup.sh
+   ```
 
-9. To start the ReactJS UI application, navigate to `arculus-gcs-ui/` and run the following commands again to install the needed dependencies and start the API server and start a development UI server. 
-```bash
-#!/bin/bash
-npm install
-npm start
-```
-
-10. To start a deployment server, run the following commands.
-```bash
-#!/bin/bash
-npm install
-pm2 start server.js
-```
-
-### Adding a Node to the K3S Cluster
-
-1. The addition of worker nodes to the cluster has been dynamized and centrally maintained on the Arculus Ground Control Client application.
-
-2. This step does not require the complete codebase to run. The script `joinClusterWizard.sh` with the private IP address of the master node and the name being requested for the node as command-line arguments would be sufficient. Run the below script on the node you wish to add to the cluster from the directory containing the script.
-```bash
-#!/bin/bash
-sudo ./joinClusterWizard.sh {master-node-private-ip} {node-name}
-```
-
-This script makes a request to an API to request addition of the node as a worker to the cluster. On the Device Management dashboard of the Arculus Ground Control Client, admin users gets a pop-up about the request and they can decide to approve or decline the request. When an admin user approves the request, the requesting node receives the K3S token of the master node to join the cluster. The script then proceeds to join the cluster using the procured token. The back-end application waits for the addition of the node, and once it is added, it deploys a K3S pod and lists it in the list of nodes in the cluster.
-
-3. This behavior can be verified by either using the UI dashboard or running the below commands on the controller node.
-```bash
-#!/bin/bash
-kubectl get nodes
-```
-```bash
-#!/bin/bash
-kubectl get pods
-```
-
-These commands list all the nodes and pods on the cluster. Make sure that all the added nodes are listed here.
-
-### Understanding the Usage and Flow of the Application
-
-The documentation of the workflow and its respective code (for developers) has been documented as a Docusaurus web app for docs. To read the docs, follow the below steps:
-
-1. Go to the `arculus-docs` directory and run `npm install` and `npm start`.
-
-2. The docs web application launches on port 6006 of the host machine. Access the docs at `{hostIp}:6006`.
-
-### Watch tutorials of application usage below:
-[![User and Device Management (Video)](http://img.youtube.com/vi/nwDFrQLYTA8/0.jpg)](https://youtu.be/nwDFrQLYTA8)
-[![Mission Planning (Video)](http://img.youtube.com/vi/J8Y1VbJu18g/0.jpg)](https://youtu.be/J8Y1VbJu18g)
-[![Normal Scenario](http://img.youtube.com/vi/OabGbvjsLhY/0.jpg)](https://youtu.be/OabGbvjsLhY) 
-[![Scenario 1: Denial of Service](http://img.youtube.com/vi/Pfk5QcVTnfo/0.jpg)](https://youtu.be/Pfk5QcVTnfo) 
-[![Scenario 2: Disruption by Brute Force and Physical Capture](http://img.youtube.com/vi/hR5MkyXRhEc/0.jpg)](https://youtu.be/hR5MkyXRhEc)
-[![Scenario 3: Intermittent Connectivity](http://img.youtube.com/vi/dO9TIpk9nCc/0.jpg)](https://youtu.be/dO9TIpk9nCc) 
-[![Scenario 4: Limited Availability of Battery](http://img.youtube.com/vi/e5xqwsqSv64/0.jpg)](https://youtu.be/e5xqwsqSv64) 
-
+### Video Tutorial
+For a detailed video demonstration on setting up Arculus, visit:
+https://www.youtube.com/watch?v=Pfk5QcVTnfo&list=PLuMWNW0dmynnA_J2aOPV3Wc_USlg1xDss&index=5&t=5s
