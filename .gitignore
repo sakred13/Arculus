@@ -15,6 +15,11 @@ arculus-gcs-ui/src/config.js
 
 # testing
 /coverage
+**/coverage/
+*.log
+
+# Jest
+jest-results.json
 
 # production
 /build

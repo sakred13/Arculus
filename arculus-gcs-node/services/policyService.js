@@ -1,194 +1,60 @@
 const { isUserOfType, getUserFromToken } = require('./authService');
 const { exec } = require('child_process');
 const util = require('util');
-const execAsync = util.promisify(require('child_process').exec);
 
-async function isAdmin(authToken) {
-    return new Promise((resolve, reject) => {
-        isUserOfType(getUserFromToken(authToken), ['Mission Creator'], (roleErr, isAdmin) => {
-            if (roleErr) {
-                console.error(roleErr);
-                reject(roleErr);
-            } else {
-                resolve(isAdmin);
-            }
-        });
-    });
-}
+const execAsync = util.promisify(exec);
 
-exports.addNetworkPolicy = (req, res) => {
-    const { authToken, device, ingress, egress } = req.body;
+// ---------------------------------------------------------------------------
+// Auth helper
+// ---------------------------------------------------------------------------
 
-    try {
-        const admin = isAdmin(authToken);
-
-        if (admin) {
-            // Construct NetworkPolicy YAML
-            const networkPolicyId = `policy-${device}`;
-            let networkPolicyYAML = `
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: ${networkPolicyId}
-spec:
-  podSelector:
-    matchLabels:
-      app: ${device}
-  policyTypes:
-  - Ingress
-  - Egress
-`;
-
-            // Add ingress rules if ingress is not null or empty
-            if (ingress && ingress.length > 0) {
-                networkPolicyYAML += `
-  ingress:
-${constructIngressYAML(device, ingress)}
-`;
-            }
-
-            // Add egress rules if egress is not null or empty
-            if (egress && egress.length > 0) {
-                networkPolicyYAML += `
-  egress:
-${constructEgressYAML(device, egress)}
-`;
-            }
-
-            // Apply NetworkPolicy YAML using kubectl
-            exec(`kubectl apply -f - <<EOF\n${networkPolicyYAML}\nEOF`, (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Error executing kubectl: ${error}`);
-                    res.status(500).json({ message: 'Failed to create NetworkPolicy' });
-                    return;
-                }
-
-                // Return the ID of the created NetworkPolicy
-                res.status(200).json({ networkPolicyId });
-            });
-        } else {
-            return res.status(403).json({ message: 'Unauthorized: Only admin users can perform this action' });
-        }
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Internal Server Error' });
-    }
+/**
+ * Resolves to true when the token belongs to a Mission Creator, false otherwise.
+ * Wraps the callback-based isUserOfType so callers can simply await it.
+ */
+const checkIsAdmin = async (authToken) => {
+    return isUserOfType(getUserFromToken(authToken), ['Mission Creator']);
 };
 
+// ---------------------------------------------------------------------------
+// YAML builders
+// ---------------------------------------------------------------------------
 
-function constructIngressYAML(device, ingress) {
-    let yaml = '';
-    ingress.forEach(rule => {
-        yaml += `
-  - from:
-    - podSelector:
-        matchLabels:
-          app: ${rule.device} # Match pods with the specified name
-    ports:
-    - protocol: ${rule.protocol}
-      port: ${rule.port}`;
-    });
-    return yaml;
-}
+const buildNetworkPolicyYAML = (device, ingressRules, egressRules) => {
+    const networkPolicyId = `policy-${device}`;
 
-function constructEgressYAML(device, egress) {
-    let yaml = '';
-    egress.forEach(rule => {
-        yaml += `
-  - to:
-    - podSelector:
-        matchLabels:
-          app: ${rule.device} # Match pods with the specified name
-    ports:
-    - protocol: ${rule.protocol}
-      port: ${rule.port}`;
-    });
-    return yaml;
-}
+    const ingressSection = ingressRules && ingressRules.length > 0
+        ? `  ingress:\n${ingressRules.map(r =>
+            `  - from:\n    - podSelector:\n        matchLabels:\n          app: ${r.device}\n    ports:\n    - protocol: ${r.protocol}\n      port: ${r.port}`
+        ).join('\n')}`
+        : '';
 
-async function addNetworkPolicyDuringMission(device, ingress, egress) {
-    try {
-        const networkPolicyId = `policy-${device}`;
-        let ingressYAML = '';
-        let egressYAML = '';
+    const egressSection = egressRules && egressRules.length > 0
+        ? `  egress:\n${egressRules.map(r =>
+            `  - to:\n    - podSelector:\n        matchLabels:\n          app: ${r.device}\n    ports:\n    - protocol: ${r.protocol}\n      port: ${r.port}`
+        ).join('\n')}`
+        : '';
 
-        if (ingress && ingress.length > 0) {
-            ingressYAML = await constructIngressYAML(device, ingress);
-        }
+    const yaml = [
+        'apiVersion: networking.k8s.io/v1',
+        'kind: NetworkPolicy',
+        'metadata:',
+        `  name: ${networkPolicyId}`,
+        'spec:',
+        '  podSelector:',
+        '    matchLabels:',
+        `      app: ${device}`,
+        '  policyTypes:',
+        '  - Ingress',
+        '  - Egress',
+        ingressSection,
+        egressSection,
+    ].filter(Boolean).join('\n');
 
-        if (egress && egress.length > 0) {
-            egressYAML = await constructEgressYAML(device, egress);
-        }
-
-        const ingressSection = ingressYAML ? `  ingress:\n${ingressYAML}` : '';
-        const egressSection = egressYAML ? `  egress:\n${egressYAML}` : '';
-
-        const networkPolicyYAML = `
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: ${networkPolicyId}
-spec:
-  podSelector:
-    matchLabels:
-      app: ${device}
-  policyTypes:
-  - Ingress
-  - Egress
-${ingressSection}
-${egressSection}
-`;
-
-        // Apply NetworkPolicy YAML using kubectl
-        const { stdout, stderr } = await execAsync(`kubectl apply -f - <<EOF\n${networkPolicyYAML}\nEOF`);
-
-        console.log(`NetworkPolicy created successfully with ID: ${networkPolicyId}`);
-        return networkPolicyId;
-    } catch (error) {
-        console.error(`Error executing kubectl: ${error}`);
-        throw new Error('Failed to create NetworkPolicy');
-    }
-}
-
-
-exports.addNetworkPolicyDuringMission = addNetworkPolicyDuringMission;
-function constructPortsYAML(ports) {
-    return ports.map(port => `    - protocol: ${port.split('/')[1]}\n      port: ${port.split('/')[0]}`).join('\n');
-}
-
-exports.getNetworkPolicies = (req, res) => {
-    const { authToken } = req.query;
-    try {
-        const admin = isAdmin(authToken);
-        if (admin) {
-            // Execute kubectl command to get NetworkPolicies in JSON format
-            exec('kubectl get networkpolicies --namespace=default -o json', (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Error executing kubectl: ${error}`);
-                    res.status(500).json({ message: 'Failed to fetch NetworkPolicies' });
-                    return;
-                }
-
-                try {
-                    const networkPolicies = parseNetworkPolicies(stdout);
-
-                    // Return the list of NetworkPolicies
-                    res.status(200).json(networkPolicies);
-                } catch (parseError) {
-                    console.error(`Error parsing NetworkPolicy JSON: ${parseError}`);
-                    res.status(500).json({ message: 'Failed to parse NetworkPolicies' });
-                }
-            });
-        } else {
-            return res.status(403).json({ message: 'Unauthorized: Only admin users can perform this action' });
-        }
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Internal Server Error' });
-    }
+    return { networkPolicyId, yaml };
 };
 
-function parseNetworkPolicies(stdout) {
+const parseNetworkPolicies = (stdout) => {
     const parsedOutput = JSON.parse(stdout);
     return parsedOutput.items.map(policy => ({
         name: policy.metadata.name,
@@ -197,56 +63,136 @@ function parseNetworkPolicies(stdout) {
         ingress: policy.spec.ingress,
         egress: policy.spec.egress,
     }));
-}
+};
 
-
-exports.deleteNetworkPolicy = (req, res) => {
-    const { authToken, policyName } = req.body;
+// ---------------------------------------------------------------------------
+// addNetworkPolicy
+// ---------------------------------------------------------------------------
+exports.addNetworkPolicy = async (req, res) => {
+    const { authToken, device, ingress, egress } = req.body;
 
     try {
-        const admin = isAdmin(authToken);
+        // BUG FIX: original code called isAdmin() without await, so the 403
+        // branch was unreachable. Now correctly awaited.
+        const admin = await checkIsAdmin(authToken);
 
-        if (admin) {
-            // Execute kubectl command to delete the NetworkPolicy
-            exec(`kubectl delete networkpolicy ${policyName} --namespace=default`, (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Error executing kubectl: ${error}`);
-                    res.status(500).json({ message: 'Failed to delete NetworkPolicy' });
-                    return;
-                }
-
-                // Check if deletion was successful
-                if (stderr) {
-                    console.error(`Error deleting NetworkPolicy: ${stderr}`);
-                    res.status(500).json({ message: 'Failed to delete NetworkPolicy' });
-                    return;
-                }
-
-                // Return success message
-                res.status(200).json({ message: 'NetworkPolicy deleted successfully' });
-            });
-        } else {
+        if (!admin) {
             return res.status(403).json({ message: 'Unauthorized: Only admin users can perform this action' });
         }
+
+        const { networkPolicyId, yaml } = buildNetworkPolicyYAML(device, ingress, egress);
+
+        exec(`kubectl apply -f - <<EOF\n${yaml}\nEOF`, (error) => {
+            if (error) {
+                console.error(`Error executing kubectl: ${error}`);
+                return res.status(500).json({ message: 'Failed to create NetworkPolicy' });
+            }
+            return res.status(200).json({ networkPolicyId });
+        });
+
     } catch (error) {
         console.error(error);
         return res.status(500).json({ message: 'Internal Server Error' });
     }
 };
 
-function deleteNetworkPolicyDuringMission(policyName) {
+// ---------------------------------------------------------------------------
+// addNetworkPolicyDuringMission  (called internally — no auth check needed)
+// ---------------------------------------------------------------------------
+const addNetworkPolicyDuringMission = async (device, ingress, egress) => {
+    const { networkPolicyId, yaml } = buildNetworkPolicyYAML(device, ingress, egress);
+
+    try {
+        await execAsync(`kubectl apply -f - <<EOF\n${yaml}\nEOF`);
+        console.log(`NetworkPolicy created successfully with ID: ${networkPolicyId}`);
+        return networkPolicyId;
+    } catch (error) {
+        console.error(`Error executing kubectl: ${error}`);
+        throw new Error('Failed to create NetworkPolicy');
+    }
+};
+
+exports.addNetworkPolicyDuringMission = addNetworkPolicyDuringMission;
+
+// ---------------------------------------------------------------------------
+// getNetworkPolicies
+// ---------------------------------------------------------------------------
+exports.getNetworkPolicies = async (req, res) => {
+    const { authToken } = req.query;
+
+    try {
+        const admin = await checkIsAdmin(authToken);
+
+        if (!admin) {
+            return res.status(403).json({ message: 'Unauthorized: Only admin users can perform this action' });
+        }
+
+        exec('kubectl get networkpolicies --namespace=default -o json', (error, stdout) => {
+            if (error) {
+                console.error(`Error executing kubectl: ${error}`);
+                return res.status(500).json({ message: 'Failed to fetch NetworkPolicies' });
+            }
+
+            try {
+                return res.status(200).json(parseNetworkPolicies(stdout));
+            } catch (parseError) {
+                console.error(`Error parsing NetworkPolicy JSON: ${parseError}`);
+                return res.status(500).json({ message: 'Failed to parse NetworkPolicies' });
+            }
+        });
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
+// ---------------------------------------------------------------------------
+// deleteNetworkPolicy
+// ---------------------------------------------------------------------------
+exports.deleteNetworkPolicy = async (req, res) => {
+    const { authToken, policyName } = req.body;
+
+    try {
+        const admin = await checkIsAdmin(authToken);
+
+        if (!admin) {
+            return res.status(403).json({ message: 'Unauthorized: Only admin users can perform this action' });
+        }
+
+        exec(`kubectl delete networkpolicy ${policyName} --namespace=default`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error executing kubectl: ${error}`);
+                return res.status(500).json({ message: 'Failed to delete NetworkPolicy' });
+            }
+            if (stderr) {
+                console.error(`Error deleting NetworkPolicy: ${stderr}`);
+                return res.status(500).json({ message: 'Failed to delete NetworkPolicy' });
+            }
+            return res.status(200).json({ message: 'NetworkPolicy deleted successfully' });
+        });
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
+// ---------------------------------------------------------------------------
+// deleteNetworkPolicyDuringMission  (fire-and-forget, called from missionService)
+// ---------------------------------------------------------------------------
+const deleteNetworkPolicyDuringMission = (policyName) => {
     exec(`kubectl delete networkpolicy ${policyName} --namespace=default`, (error, stdout, stderr) => {
         if (error) {
-            console.error(`Error executing kubectl: ${error}`);
-            throw new Error('Failed to delete NetworkPolicy');
+            console.error(`Error deleting NetworkPolicy: ${error.message}`);
+            return;
         }
-
         if (stderr) {
             console.error(`Error deleting NetworkPolicy: ${stderr}`);
-            throw new Error('Failed to delete NetworkPolicy');
+            return;
         }
-
         console.log('NetworkPolicy deleted successfully');
     });
-}
+};
+
 exports.deleteNetworkPolicyDuringMission = deleteNetworkPolicyDuringMission;

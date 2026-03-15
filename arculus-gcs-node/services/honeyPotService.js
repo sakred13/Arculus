@@ -2,170 +2,151 @@ const fs = require('fs-extra');
 const axios = require('axios');
 
 const { isUserOfType, getUserFromToken } = require('./authService');
-const honeypotConfig = JSON.parse(fs.readFileSync('configs/honeypot_config.json'));
+
+let honeypotConfig = {};
+try {
+    honeypotConfig = Object.freeze(JSON.parse(fs.readFileSync('configs/honeypot_config.json', 'utf8')));
+} catch (error) {
+    console.error('Failed to load honeypot config:', error.message);
+}
+
 const deployedHoneypots = [];
 
 exports.createHoneyPot = async (req, res) => {
+    const { authToken, honeypotTarget, honeypotType } = req.query;
+
     try {
-        const { authToken } = req.query;
+        const username = getUserFromToken(authToken);
 
-        // Check if the user has an admin role
-        isUserOfType(getUserFromToken(authToken), ['Mission Creator'], async (roleErr, isAdmin) => {
-            if (roleErr) {
-                console.error(roleErr);
-                return res.status(500).json({ message: 'Internal Server Error' });
+        if (!username || username === 'Unauthorized') {
+             return res.status(403).json({ message: 'Unauthorized: Invalid or missing token' });
+        }
+
+        const isAdmin = await isUserOfType(username, ['Mission Creator']);
+
+        if (!isAdmin) {
+             return res.status(403).json({ message: 'Unauthorized: Only users with admin role can access the honeypot API' });
+        }
+
+        const isDuplicate = deployedHoneypots.some((honeypot) =>
+            honeypot.honeypotTarget === honeypotTarget && honeypot.honeypotType === honeypotType
+        );
+
+        if (isDuplicate) {
+            return res.status(400).json({ message: 'Duplicate request: Honeypot already deployed with the same target and type' });
+        }
+
+        const honeypotApiUrl = `http://${honeypotTarget}:5000/deployHoneyPot`;
+        console.log("honey: ", honeypotApiUrl);
+
+        try {
+            const response = await axios({
+                method: req.method,
+                url: honeypotApiUrl,
+                headers: {},
+                data: {
+                    url: honeypotConfig.url,
+                    deployKey: honeypotConfig.deployKey,
+                    potType: honeypotType
+                },
+            });
+
+            if (response.status === 200) {
+                deployedHoneypots.push({
+                    honeypotTarget,
+                    honeypotType
+                });
+                console.log("Deployed: ", deployedHoneypots);
             }
 
-            if (isAdmin) {
-                const { honeypotTarget, honeypotType } = req.query;
+            return res.status(response.status).json(response.data);
+            
+        } catch (axiosError) {
+            console.error('Error calling honeypot API:', axiosError);
+            return res.status(axiosError.response ? axiosError.response.status : 500).json({ error: 'Internal Server Error' });
+        }
 
-                // Check if the request is a duplicate by comparing with deployedHoneypots
-                const isDuplicate = deployedHoneypots.some((honeypot) =>
-                    honeypot.honeypotTarget === honeypotTarget && honeypot.honeypotType === honeypotType
-                );
-
-                if (isDuplicate) {
-                    // Send a response indicating that it's a duplicate request
-                    return res.status(400).json({ message: 'Duplicate request: Honeypot already deployed with the same target and type' });
-                }
-
-                // Create the full URL to the honeypot service API
-                const honeypotApiUrl = `http://${honeypotTarget}:5000/deployHoneyPot`;
-                console.log("honey: ", honeypotApiUrl);
-
-                // Make a request to the honeypot API, forwarding the HTTP method and query parameters
-                try {
-                    const response = await axios({
-                        method: req.method,
-                        url: honeypotApiUrl,
-                        headers: {
-                            // Other headers as needed to mimic the dashboard request
-                        },
-                        data: {
-                            url: honeypotConfig.url,
-                            deployKey: honeypotConfig.deployKey,
-                            potType: honeypotType
-                        }, // Include request body if present (for POST and PUT requests)
-                    });
-
-                    // Check if the API call was successful
-                    if (response.status === 200) {
-                        // Store the details of the deployed honeypot in the global variable
-                        const deployedHoneypot = {
-                            honeypotTarget,
-                            honeypotType,
-                            // You can add more details here if needed
-                        };
-                        deployedHoneypots.push(deployedHoneypot);
-                        console.log("Deployed: ", deployedHoneypots);
-                    }
-
-                    // Forward the honeypot service response to the client
-                    res.status(response.status).json(response.data);
-                } catch (error) {
-                    // Handle errors from the external API
-                    console.error('Error calling honeypot API:', error);
-
-                    // Return the error response to the client
-                    res.status(error.response ? error.response.status : 500).json({ error: 'Internal Server Error' });
-                }
-            } else {
-                return res.status(403).json({ message: 'Unauthorized: Only users with admin role can access the honeypot API' });
-            }
-        });
     } catch (error) {
-        console.error('Error calling honeypot API:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('Error in createHoneyPot:', error);
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 };
 
 exports.undeployHoneypot = async (req, res) => {
+    const { authToken, honeypotTarget, honeypotType } = req.query;
+
     try {
-        const { authToken } = req.query;
+        const username = getUserFromToken(authToken);
 
-        // Check if the user has an admin role
-        isUserOfType(getUserFromToken(authToken), ['Mission Creator'], async (roleErr, isAdmin) => {
-            if (roleErr) {
-                console.error(roleErr);
-                return res.status(500).json({ message: 'Internal Server Error' });
+        if (!username || username === 'Unauthorized') {
+             return res.status(403).json({ message: 'Unauthorized: Invalid or missing token' });
+        }
+
+        const isAdmin = await isUserOfType(username, ['Mission Creator']);
+
+        if (!isAdmin) {
+             return res.status(403).json({ message: 'Unauthorized: Only users with admin role can undeploy honeypot' });
+        }
+
+        const deployedHoneypotIndex = deployedHoneypots.findIndex((honeypot) =>
+            honeypot.honeypotTarget === honeypotTarget && honeypot.honeypotType === honeypotType
+        );
+
+        if (deployedHoneypotIndex === -1) {
+            return res.status(404).json({ message: 'Honeypot not found' });
+        }
+
+        const honeypotApiUrl = `http://${honeypotTarget}:5000/undeployHoneypot`;
+
+        try {
+            const response = await axios({
+                method: 'DELETE',
+                url: honeypotApiUrl,
+                headers: {},
+                data: {
+                    url: honeypotConfig.url,
+                    potType: honeypotType
+                },
+            });
+
+            if (response.status === 200) {
+                deployedHoneypots.splice(deployedHoneypotIndex, 1);
+                console.log("Undeployed: ", deployedHoneypots);
             }
 
-            if (isAdmin) {
-                const { honeypotTarget, honeypotType } = req.query;
+            return res.status(response.status).json(response.data);
 
-                // Find the deployed honeypot based on the target and type
-                const deployedHoneypotIndex = deployedHoneypots.findIndex((honeypot) =>
-                    honeypot.honeypotTarget === honeypotTarget && honeypot.honeypotType === honeypotType
-                );
+        } catch (axiosError) {
+            console.error('Error calling honeypot API for undeploy:', axiosError);
+            return res.status(axiosError.response ? axiosError.response.status : 500).json({ error: 'Internal Server Error' });
+        }
 
-                if (deployedHoneypotIndex === -1) {
-                    return res.status(404).json({ message: 'Honeypot not found' });
-                }
-
-                // Create the full URL to the honeypot service API
-                const honeypotApiUrl = `http://${honeypotTarget}:5000/undeployHoneypot`;
-
-                // Make a request to the honeypot API to undeploy the honeypot
-                try {
-                    const response = await axios({
-                        method: 'DELETE',
-                        url: honeypotApiUrl,
-                        headers: {
-                            // Other headers as needed to mimic the dashboard request
-                        },
-                        data: {
-                            url: honeypotConfig.url,
-                            potType: honeypotType
-                        },
-                    });
-
-                    // Check if the API call was successful
-                    if (response.status === 200) {
-                        // Remove the deployed honeypot from the global variable
-                        deployedHoneypots.splice(deployedHoneypotIndex, 1);
-                        console.log("Undeployed: ", deployedHoneypots);
-                    }
-
-                    // Forward the honeypot service response to the client
-                    res.status(response.status).json(response.data);
-                } catch (error) {
-                    // Handle errors from the external API
-                    console.error('Error calling honeypot API:', error);
-
-                    // Return the error response to the client
-                    res.status(error.response ? error.response.status : 500).json({ error: 'Internal Server Error' });
-                }
-            } else {
-                return res.status(403).json({ message: 'Unauthorized: Only users with admin role can undeploy honeypots' });
-            }
-        });
     } catch (error) {
-        console.error('Error calling honeypot API:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('Error in undeployHoneypot:', error);
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 };
 
 exports.getDeployedHoneypots = async (req, res) => {
+    const { authToken } = req.query;
+
     try {
-        const { authToken } = req.query;
+        const username = getUserFromToken(authToken);
 
-        // Check if the user has an admin role
-        isUserOfType(getUserFromToken(authToken), ['Mission Creator'], (roleErr, isAdmin) => {
-            if (roleErr) {
-                console.error(roleErr);
-                return res.status(500).json({ message: 'Internal Server Error' });
-            }
+        if (!username || username === 'Unauthorized') {
+             return res.status(403).json({ message: 'Unauthorized: Invalid or missing token' });
+        }
 
-            if (isAdmin) {
-                // Return the deployed honeypots if the user is an admin
-                return res.status(200).json({ deployedHoneypots });
-            } else {
-                return res.status(403).json({ message: 'Unauthorized: Only users with admin role can access the deployed honeypots' });
-            }
-        });
+        const isAdmin = await isUserOfType(username, ['Mission Creator']);
+
+        if (!isAdmin) {
+             return res.status(403).json({ message: 'Unauthorized: Only users with admin role can access the deployed honeypots' });
+        }
+
+        return res.status(200).json({ deployedHoneypots });
+
     } catch (error) {
         console.error('Error getting deployed honeypots:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 };
-
