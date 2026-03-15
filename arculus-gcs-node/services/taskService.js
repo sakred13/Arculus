@@ -1,7 +1,7 @@
 const { isUserOfType, getUserFromToken } = require('./authService');
 const pool = require('../modules/arculusDbConnection');
 
-exports.getTasks = (req, res) => {
+exports.getTasks = async (req, res) => {
     const { authToken } = req.query;
 
     try {
@@ -10,28 +10,18 @@ exports.getTasks = (req, res) => {
             return res.status(403).json({ message: 'Unauthorized: Invalid token' });
         }
 
-        isUserOfType(username, ['Mission Creator'], (err, isAdmin) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).json({ message: 'Internal Server Error' });
-            }
+        const isAdmin = await isUserOfType(username, ['Mission Creator']);
 
-            if (isAdmin) {
-                pool.query('SELECT task_name FROM task', (err, results) => {
-                    if (err) {
-                        console.error(err);
-                        return res.status(500).json({ message: 'Internal Server Error' });
-                    }
-                    const taskNames = results.map(result => result.task_name);
-                    return res.status(200).json({ taskNames });
-                });
-            } else {
-                return res.status(403).json({ message: 'Unauthorized: Only users with admin role can perform this action' });
-            }
-        });
+        if (!isAdmin) {
+            return res.status(403).json({ message: 'Unauthorized: Only users with admin role can perform this action' });
+        }
+
+        const [results] = await pool.promise().query('SELECT task_name FROM task');
+        const taskNames = results.map(result => result.task_name);
+        
+        return res.status(200).json({ taskNames });
     } catch (error) {
         console.error(error);
         return res.status(500).json({ message: 'Internal Server Error' });
     }
 };
-

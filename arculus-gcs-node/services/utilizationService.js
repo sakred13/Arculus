@@ -39,19 +39,20 @@ const getUtilizationApi = (req, res) => {
   res.json(utilizationData);
 };
 
-const saveUtilizationDataToCSV = (req, res) => {
+const saveUtilizationDataToCSV = async (req, res) => {
   const timestamp = new Date().toISOString().replace(/:/g, '-'); // Replace colons with dashes for Windows compatibility
   const filePath = `utilization_data_${timestamp}.csv`;
 
   const csvData = utilizationData.map(({ cpu, ram }) => `${cpu},${ram}`).join('\n');
-  fs.writeFile(filePath, 'CPU Utilization (%),RAM Utilization (%)\n' + csvData, err => {
-    if (err) {
-      console.error('Error saving utilization data to CSV:', err);
-    } else {
+  
+  try {
+      await fs.promises.writeFile(filePath, 'CPU Utilization (%),RAM Utilization (%)\n' + csvData);
       console.log(`Utilization data saved to ${filePath} successfully.`);
-      res.json({message: "Success"});
-    }
-  });
+      res.json({ message: "Success" });
+  } catch (err) {
+      console.error('Error saving utilization data to CSV:', err);
+      res.json({ message: "Internal Server Error" }); // Added to prevent hanging requests on failure
+  }
 }
 
 // Start collecting utilization data

@@ -19,6 +19,8 @@ When writing or structuring React JS code, adhere to the following modern best p
    - **Separation of Concerns:** Keep complex logic (custom hooks) and UI (JSX) in separate files when possible. For example, extract complex `useEffect` or state logic into a separate `useMyComponentLogic.ts` file, leaving the component file primarily for rendering JSX.
 5. **State Management:** Keep state as close to the components that use it as possible. Avoid dumping everything into a global store. Use Context API for prop drilling issues, and only reach for Redux Toolkit or Zustand for complex, app-wide state.
 6. **Effect Cleanup:** Always clean up side effects (like event listeners or timers) inside a `useEffect` return function to prevent memory leaks.
+7. **Clean Architecture structure:** Always aim for a clear separation of concerns in React projects, such as `/core/models`, `/core/services`, `/presentation/components`, and `/presentation/hooks`. Presentation components should be dumb, handling only JSX, and querying logic/fetches should reside in custom hooks and Contexts.
+8. **Routing Performance:** When using `react-router-dom`, avoid wrapping individual `<Route element={...} />` configurations inside heavy functional Layout wrappers directly, as it will unmount and remount the Layout tree on every navigation change. Use `<Outlet />` inside a root `Layout` structure that sits outside of the dynamic switch/routes block.
 
 ### Rules for Modifying React Code
 

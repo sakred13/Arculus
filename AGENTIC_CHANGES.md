@@ -44,3 +44,24 @@ This file tracks the refactoring changes made by the AI agent.
 - **YAML Builder Deduplication**: Extracted a single `buildNetworkPolicyYAML(device, ingress, egress)` helper that replaces two separate and fragmented `constructIngressYAML` / `constructEgressYAML` functions used inconsistently across `addNetworkPolicy` and `addNetworkPolicyDuringMission`.
 - **`deleteNetworkPolicyDuringMission` hardened**: The original threw inside a callback (which silently disappears in Node.js) — changed to `console.error` only, since this is a fire-and-forget call.
 - **Tests Created**: 12 tests covering all exported functions in `tests/services/policyService.test.js`.
+
+## `roleService.js`
+- **Asynchronous Programming**: Flattened callback tree. `getRoles` converted to an `async` function, properly awaiting the validation promise `isUserOfType`.
+- **Error Handling**: Standardized with a single overarching `try/catch` and appropriate early returns for 403 statuses.
+- **Promises**: Changed `pool.query` to `pool.promise().query()`.
+- **Tests Created**: Mapped standard auth gating responses and success return types in `tests/services/roleService.test.js`.
+
+## `taskService.js`
+- **Asynchronous Programming**: Cleaned up deep nesting by converting to `async/await`.
+- **Modernization**: Applied the Promise wrapper for the database queries returning single arrays without error-callbacks.
+- **Tests Created**: Replicated the structure of roleService to lock down existing APIs for `getTasks` in `tests/services/taskService.test.js`.
+
+## `userService.js`
+- **Transactions**: Refactored `deleteUser`, `getUsers`, and `getCurrentUser` standard `pool.getConnection` callbacks into modern Promise flows. Adopted `try-catch-finally` to guarantee `connection.release()` happens consistently, reducing connection leak risks. `connection.beginTransaction` and `connection.commit` are securely awaited.
+- **Callback Hell Removed**: `updateUser` previously required 4 layers of deep indentation. It was fully refactored to top-level `await` pipelines that resolve cleanly in-line.
+- **Tests Created**: Validated highly complex transaction queries by mocking `pool.promise().getConnection()` properties comprehensively in `tests/services/userService.test.js`.
+
+## `utilizationService.js`
+- **Asynchronous Flow**: Refactored `saveUtilizationDataToCSV` to rely on `fs.promises.writeFile`.
+- **Resiliency**: Replaced unhandled failures that left HTTP connections suspended with strong `try/catch` error handling that reliably returns 500 status codes.
+- **Tests Created**: Tested the data endpoints and file-system saves in `tests/services/utilizationService.test.js`.
